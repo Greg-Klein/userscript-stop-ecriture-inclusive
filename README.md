@@ -54,7 +54,7 @@ Le script convertit automatiquement :
 
 ### 📋 Prérequis
 
-- Node.js (v14 ou supérieur)
+- Node.js (v16 ou supérieur)
 - npm
 
 ### 🛠️ Installation

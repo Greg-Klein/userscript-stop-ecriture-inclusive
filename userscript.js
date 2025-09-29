@@ -8,216 +8,287 @@
 // @run-at       document_idle
 // ==/UserScript==
 
-(() => {
-  "use strict";
+// --- TOOLS ---------------------------------------------------------------
+const nodesToReject = ["svg", "script", "style", "noscript", "iframe", "input"];
 
-  // --- OUTILS ---------------------------------------------------------------
-  // Plage Unicode pour lettres FR, apostrophes & traits usuels.
-  const L = "A-Za-zÀ-ÖØ-öø-ÿ";
-  // Tous les séparateurs "point médian like"
-  const SEP_CLASS = "[·•⋅·‧-]";
-  const SEP_RE = /[·•⋅·‧-]/g;
+function isContentEditable(node) {
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const valuesToAvoid = ["true", "plaintext-only"];
+    const contenteditable = node.attributes.getNamedItem("contenteditable");
 
-  const shouldSkipNode = (node) => {
-    if (!node || !node.parentNode) return true;
-    const p = node.parentNode;
-    if (p.isContentEditable) return true;
-    const tag = p.nodeName;
-    return /^(SCRIPT|STYLE|NOSCRIPT|CODE|KBD|SAMP|PRE|TEXTAREA|INPUT)$/i.test(
-      tag
+    return (
+      contenteditable !== null && valuesToAvoid.includes(contenteditable.value)
     );
+  }
+  return false;
+}
+
+function hasAnyContentEditableParent(node) {
+  let hasReachedDocumentTop = false;
+  while (!hasReachedDocumentTop) {
+    if (node.parentNode !== null && isContentEditable(node.parentNode)) {
+      return true;
+    }
+    node = node.parentNode;
+    hasReachedDocumentTop = node.parentNode === null;
+  }
+  return false;
+}
+
+function acceptNodeFilter(node) {
+  const parentNodeName =
+    node.parentNode !== null && node.parentNode.nodeName.toLowerCase();
+
+  if (nodesToReject.includes(parentNodeName)) {
+    return NodeFilter.FILTER_REJECT;
+  }
+  if (hasAnyContentEditableParent(node)) {
+    return NodeFilter.FILTER_REJECT;
+  }
+  return NodeFilter.FILTER_ACCEPT;
+}
+
+// Preserve case for certain replacements (Iel -> Il, IELS -> ILS…)
+const preserveCase = (from, to) => {
+  if (from.toUpperCase() === from) return to.toUpperCase();
+  if (from[0] === from[0].toUpperCase())
+    return to[0].toUpperCase() + to.slice(1);
+  return to;
+};
+
+// --- REPLACEMENT RULES ----------------------------------------------
+const wordFilters = {
+  mien: ["miem", "miæn"],
+  tous: ["touste", "toustes", "touxe", "touxes"],
+  celui: ["cellui", "célui"],
+  ceux: ["celleux", "ceulles", "ceuxes", "ceuze"],
+  eux: ["elleux", "euxes"],
+  ce: ["cès", "cèx"],
+  un: ["unæ"],
+  lui: ["ellui"],
+  il: ["iel", "ielle"],
+  ils: ["iels", "ielles", "illes"],
+  instituteur: ["instituteurice"],
+  copain: ["copaine"],
+  copains: ["copaines"],
+};
+
+const separators = ["-", "⋅", "·", "•", "‧", "\\."];
+const patternSeparators = "(?:" + separators.join("|") + ")";
+const startBoundary = "(?<=^|[^\\p{L}])";
+const endBoundary = "(?=[^\\p{L}]|$)";
+
+const lexicalReplacements = Object.entries(wordFilters).map(
+  ([replaceWith, wordsToReplace]) => {
+    let regexpStr = wordsToReplace
+      .map((word) => startBoundary + word + endBoundary)
+      .join("|");
+    return {
+      re: new RegExp(regexpStr, "mgiu"),
+      to: (m) => preserveCase(m, replaceWith),
+    };
+  }
+);
+
+function isLikelyInclusiveWriting(s) {
+  // Check if the text looks like inclusive writing
+  if (!s) return false;
+
+  // Avoid URLs and file names
+  if (/(https?:\/\/|\w+\.\w+\/)[^\s]*/.test(s)) {
+    return false;
+  }
+
+  // Special cases like serait-iel
+  if (/serait-iel\b/i.test(s)) {
+    return true;
+  }
+
+  // Check inclusive pronouns
+  const pronounPattern = Object.values(wordFilters).flat().join("|");
+  if (new RegExp(`\\b(${pronounPattern})\\b`, "i").test(s)) {
+    return true;
+  }
+
+  // Check separators between letters (but not dots in names like E.Leclerc)
+  const sepPattern = `(?<!\\.)(?<!-)\\p{L}[${separators.join("")}]\\p{L}`;
+  return new RegExp(sepPattern, "u").test(s);
+}
+
+function removeInclusiveWriting(s) {
+  if (!s || !isLikelyInclusiveWriting(s)) {
+    return s; // fast: nothing to do
+  }
+
+  let out = s;
+
+  // Save only real compound names (with capitals) and names with dots
+  const savedWords = {};
+  let counter = 0;
+  const placeholder = (m) => {
+    const key = `__SAVED_${counter++}__`;
+    savedWords[key] = m;
+    return key;
   };
-
-  // Normalisation locale d'un texte : uniformiser les séparateurs en "·"
-  const normSeparators = (s) => s.replace(SEP_RE, "·");
-
-  // Conserver la casse pour certains remplacements (Iel -> Il, IELS -> ILS…)
-  const preserveCase = (from, to) => {
-    if (from.toUpperCase() === from) return to.toUpperCase();
-    if (from[0] === from[0].toUpperCase())
-      return to[0].toUpperCase() + to.slice(1);
-    return to;
-  };
-
-  // --- RÈGLES DE REMPLACEMENT ----------------------------------------------
-  // 1) Doublets abrégés au point médian (ou variantes) :
-  //    - "arrivé·e·s"  -> "arrivés"
-  //    - "lecteur·rice·s" -> "lecteurs"
-  //    - "fier·ère"    -> "fier"
-  //    - "étudiant-e-s" -> "étudiants"
-  //
-  // Heuristique simple et robuste : on conserve la base AVANT le 1er séparateur,
-  // puis on ajoute "s" si la forme comporte un "·s" final.
-  const rePointMedianWord = new RegExp(
-    `\\b([${L}'-]+)(?:${SEP_CLASS}[${L}'-]+)+(?:${SEP_CLASS}s)?\\b`,
-    "giu"
+  out = out.replace(
+    /[A-Z][a-z]+(?:-[A-Z][a-z]+)+|[A-Z](?:\.[A-Z][a-z]+)+/g,
+    placeholder
   );
 
-  // 2) Parenthèses / slashs :
-  //    - "copain(ne)s" -> "copains"
-  //    - "auteur/trice/s" -> "auteurs"
-  // Principe : garder la base avant "(" ou "/" ; si un "s" final optionnel est présent, on le conserve.
-  const reParenCompact = new RegExp(
-    `\\b([${L}'-]+)\\([^\\)]*\\)(s?)\\b`,
-    "giu"
-  );
-  const reSlashCompact = new RegExp(
-    `\\b([${L}'-]+)\\/[${L}'-]+(\\/s)?\\b`,
-    "giu"
-  );
+  // Handle very specific cases first before any other processing
+  // Use a special placeholder for serait-il
+  const seraitIlPlaceholder = "__SERAIT_IL__";
+  out = out.replace(/serait-iel\b/gi, seraitIlPlaceholder);
+  out = out.replace(/serait-il[·•⋅‧\.-]elle\b/gi, seraitIlPlaceholder);
 
-  // 3) Pronoms / néologismes fréquents :
-  //    - iel(s) -> il(s)
-  //    - ielle(s) -> elle(s)
-  //    - celleux -> ceux ; Celleux -> Ceux
-  //    - toustes -> tous ; Toustes -> Tous
-  //    - illes (forme inclusive de ils/elles) -> ils
-  const lexicalReplacements = [
+  // Special handling to preserve case of "Cher"
+  out = out.replace(/([Cc]her)[·•⋅‧\.-]e[·•⋅‧\.-]s\b/gi, (m, prefix) => {
+    return prefix === "Cher" ? "Chers" : "chers";
+  });
+
+  // Special cases
+  const specialCases = [
     {
-      re: /\b(iel|iels)\b/giu,
-      to: (m) =>
-        preserveCase(
-          m,
-          m.toLowerCase() === "iels" || m.toLowerCase() === "iel"
-            ? m.toLowerCase() === "iels"
-              ? "ils"
-              : "il"
-            : "il"
-        ),
+      pattern: `${startBoundary}serait${patternSeparators}elle${endBoundary}`,
+      replacement: "serait-il",
     },
     {
-      re: /\b(ielle|ielles)\b/giu,
-      to: (m) =>
-        preserveCase(m, m.toLowerCase() === "ielles" ? "elles" : "elle"),
+      pattern: `${startBoundary}be${patternSeparators}aux${patternSeparators}lles${endBoundary}`,
+      replacement: "beaux",
     },
-    { re: /\b(celleux)\b/giu, to: (m) => preserveCase(m, "ceux") },
-    { re: /\b(toustes)\b/giu, to: (m) => preserveCase(m, "tous") },
-    { re: /\b(illes)\b/giu, to: (m) => preserveCase(m, "ils") },
     {
-      re: new RegExp(`\\b(${L}+)(?:${SEP_CLASS}e)s\\b`, "giu"),
-      to: (m) => m.replace(new RegExp(SEP_CLASS, "g"), "").replace(/e?s$/, "s"),
+      pattern: `${startBoundary}be${patternSeparators}aux${endBoundary}`,
+      replacement: "beaux",
+    },
+    {
+      pattern: `${startBoundary}quelqu'un${patternSeparators}e${endBoundary}`,
+      replacement: "quelqu'un",
+    },
+    {
+      pattern: `${startBoundary}prêt${patternSeparators}e${endBoundary}`,
+      replacement: "prêt",
+    },
+    {
+      pattern: `${startBoundary}([Cc]her)${patternSeparators}e${endBoundary}`,
+      replacement: (m, prefix) => prefix,
+    },
+    {
+      // Handle -rice endings
+      pattern: `${startBoundary}([\\p{L}]+)(?:eur|teur)${patternSeparators}rice(?:${patternSeparators}s)?${endBoundary}`,
+      replacement: (m, prefix) => `${prefix}eur${m.endsWith("s") ? "s" : ""}`,
+    },
+    {
+      // Handle -e and -s endings (except after serait)
+      pattern: `(?<!\\.)(?<!-)(?<!serait)(?<=\\p{L})${patternSeparators}e(?:${patternSeparators}s)?${endBoundary}`,
+      replacement: (m) => (m.endsWith("s") ? "s" : ""),
+    },
+    {
+      // Handle doublets with separator (except compound names with hyphen and already treated cases)
+      pattern: `(?<!\\.)(?<!-)(?<!-il)(?<!serait-)${startBoundary}([\\p{L}]+)${patternSeparators}[\\p{L}]+(?:${patternSeparators}s)?${endBoundary}`,
+      replacement: (m, prefix) => prefix + (m.endsWith("s") ? "s" : ""),
     },
   ];
 
-  // 4) Nettoyage léger de doublets typographiques dispersés :
-  //    - "chef·fe·s" -> "chefs"
-  //    - "ambassadeur·rice·s" -> "ambassadeurs"
-  //    (déjà couvert par 1), mais garde-fous si « ·s » a disparu lors d'autres remplacements)
-  const reTrailingDotS = new RegExp(`${SEP_CLASS}s\\b`, "giu");
-
-  function isLikelyInclusiveWriting(s) {
-    // Vérifie si le texte ressemble à de l'écriture inclusive
-    return (
-      // Contient un séparateur entre deux lettres
-      (/[A-Za-zÀ-ÿ][·•⋅·‧-][A-Za-zÀ-ÿ]/.test(s) &&
-        // Évite les noms de fichiers avec tiret
-        !/\.[a-z]+$/i.test(s) &&
-        // Évite les URLs avec tiret
-        !/(https?:\/\/|\w+\.\w+\/)[^\s]*/.test(s) &&
-        // Évite les mots avec tirets qui ne ressemblent pas à de l'écriture inclusive
-        !/\w+(-\w{2,}){2,}/.test(s)) ||
-      // Contient une parenthèse entre deux lettres
-      /[A-Za-zÀ-ÿ]\([A-Za-zÀ-ÿ]/.test(s) ||
-      // Contient un slash entre deux lettres
-      /[A-Za-zÀ-ÿ]\/[A-Za-zÀ-ÿ]/.test(s) ||
-      // Contient un pronom inclusif
-      /\b(iel|iels|ielle|ielles|toustes|celleux|illes)\b/i.test(s)
-    );
+  // Apply special cases
+  for (const { pattern, replacement } of specialCases) {
+    out = out.replace(new RegExp(pattern, "mgiu"), replacement);
   }
 
-  function convertText(s) {
-    if (!s || !isLikelyInclusiveWriting(s)) {
-      return s; // rapide: rien à faire
-    }
-    let out = normSeparators(s);
-
-    // Doublets au point médian (garde la base + 's' éventuel)
-    out = out.replace(rePointMedianWord, (match) => {
-      // Exemple: "lecteur·rice·s" -> "lecteurs"
-      return match.split(SEP_RE)[0] + (match.endsWith("s") ? "s" : "");
-    });
-
-    // Doublets (parenthèses)
-    out = out.replace(
-      reParenCompact,
-      (match, base, sFinal) => base + (sFinal || "")
-    );
-    // Doublets (slash)
-    out = out.replace(
-      reSlashCompact,
-      (match, base, sPart) => base + (sPart ? "s" : "")
-    );
-
-    // Lexique (pronoms / néologismes)
-    for (const { re, to } of lexicalReplacements) {
-      out = out.replace(re, (m) => (typeof to === "function" ? to(m) : to));
-    }
-
-    // Nettoyage final résiduel "·s" -> "s"
-    out = out.replace(reTrailingDotS, "s");
-
-    return out;
+  // Replace inclusive pronouns via lexicalReplacements
+  for (const { re, to } of lexicalReplacements) {
+    out = out.replace(re, (m) => (typeof to === "function" ? to(m) : to));
   }
 
-  // --- PARCOURS DU DOM ------------------------------------------------------
-  const walkerFilter = {
-    acceptNode(node) {
-      if (node.nodeType !== 3) return NodeFilter.FILTER_REJECT; // text
-      if (shouldSkipNode(node)) return NodeFilter.FILTER_REJECT;
-      return NodeFilter.FILTER_ACCEPT;
-    },
+  // Restore compound names and names with dots
+  for (const [key, value] of Object.entries(savedWords)) {
+    out = out.replace(key, value);
+  }
+
+  // Restore serait-il
+  out = out.replace(new RegExp(seraitIlPlaceholder, "g"), "serait-il");
+
+  // Clean up multiple spaces
+  out = out.replace(/\s+/g, " ");
+
+  return out;
+}
+
+// For testing purposes
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    removeInclusiveWriting,
+    isContentEditable,
+    hasAnyContentEditableParent,
+    acceptNodeFilter,
   };
+}
 
-  function runOnce(root) {
-    try {
-      const walker = document.createTreeWalker(
-        root,
+(() => {
+  if (typeof window === "undefined") return; // Skip browser code in Node.js
+
+  ("use strict");
+
+  // --- DOM TRAVERSAL ------------------------------------------------------
+  function textNodesUnder(node) {
+    let n,
+      a = [],
+      walk = document.createTreeWalker(
+        node,
         NodeFilter.SHOW_TEXT,
-        walkerFilter
+        {
+          acceptNode: (node) => acceptNodeFilter(node),
+        },
+        false
       );
-      const toChange = [];
-      let n;
-      while ((n = walker.nextNode())) {
-        const t = n.nodeValue;
-        const conv = convertText(t);
-        if (conv !== t) toChange.push([n, conv]);
-      }
-      for (const [node, v] of toChange) node.nodeValue = v;
-    } catch {
-      // pas dramatique, on ignore
+    while ((n = walk.nextNode())) a.push(n);
+    return a;
+  }
+
+  function fixTextNode(textNode) {
+    let originalText = textNode.textContent;
+    let fixedText = removeInclusiveWriting(textNode.textContent);
+    if (originalText === fixedText) {
+      return;
+    }
+    textNode.textContent = fixedText;
+  }
+
+  function fixTextsUnderNode(node) {
+    let pageTextNodes = textNodesUnder(node);
+    pageTextNodes.forEach((textNode) => fixTextNode(textNode));
+  }
+
+  function processMutationRecord(mutationRecord) {
+    switch (mutationRecord.type) {
+      case "childList":
+        mutationRecord.addedNodes.forEach((node) => fixTextsUnderNode(node));
+        break;
+
+      case "characterData":
+        if (
+          acceptNodeFilter(mutationRecord.target) === NodeFilter.FILTER_ACCEPT
+        ) {
+          fixTextNode(mutationRecord.target);
+        }
+        break;
     }
   }
 
-  // Traitement initial
-  runOnce(document.body);
+  function setBodyObserver() {
+    const bodyObserver = new MutationObserver((mutationsList) => {
+      mutationsList.forEach((mutationRecord) => {
+        processMutationRecord(mutationRecord);
+      });
+    });
+    bodyObserver.observe(document.body, {
+      attributes: false,
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
 
-  // Observer dynamique (ajouts/modifs)
-  const mo = new MutationObserver((mut) => {
-    for (const m of mut) {
-      for (const node of m.addedNodes || []) {
-        if (node.nodeType === 1) runOnce(node);
-        else if (node.nodeType === 3 && !shouldSkipNode(node)) {
-          const v = node.nodeValue;
-          const c = convertText(v);
-          if (c !== v) node.nodeValue = c;
-        }
-      }
-      if (
-        m.type === "characterData" &&
-        m.target &&
-        m.target.nodeType === 3 &&
-        !shouldSkipNode(m.target)
-      ) {
-        const v = m.target.nodeValue;
-        const c = convertText(v);
-        if (c !== v) m.target.nodeValue = c;
-      }
-    }
-  });
-
-  mo.observe(document.documentElement || document.body, {
-    childList: true,
-    characterData: true,
-    subtree: true,
-  });
+  // Initial processing
+  fixTextsUnderNode(document.body);
+  setBodyObserver();
 })();
