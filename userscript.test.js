@@ -9,8 +9,8 @@ document.body.innerHTML = "";
 // Plage Unicode pour lettres FR, apostrophes & traits usuels.
 const L = "A-Za-zÀ-ÖØ-öø-ÿ";
 // Tous les séparateurs "point médian like"
-const SEP_CLASS = "[·•⋅·‧.-]";
-const SEP_RE = /[·•⋅·‧.-]/g;
+const SEP_CLASS = "[·•⋅·‧-]";
+const SEP_RE = /[·•⋅·‧-]/g;
 
 // Normalisation locale d'un texte : uniformiser les séparateurs en "·"
 const normSeparators = (s) => s.replace(SEP_RE, "·");
@@ -66,13 +66,22 @@ const lexicalReplacements = [
 // Nettoyage léger de doublets typographiques dispersés
 const reTrailingDotS = new RegExp(`${SEP_CLASS}s\\b`, "giu");
 
+function isLikelyInclusiveWriting(s) {
+  // Vérifie si le texte ressemble à de l'écriture inclusive
+  return (
+    // Contient un séparateur entre deux lettres
+    /[A-Za-zÀ-ÿ][·•⋅·‧-][A-Za-zÀ-ÿ]/.test(s) ||
+    // Contient une parenthèse entre deux lettres
+    /[A-Za-zÀ-ÿ]\([A-Za-zÀ-ÿ]/.test(s) ||
+    // Contient un slash entre deux lettres
+    /[A-Za-zÀ-ÿ]\/[A-Za-zÀ-ÿ]/.test(s) ||
+    // Contient un pronom inclusif
+    /\b(iel|iels|ielle|ielles|toustes|celleux|illes)\b/i.test(s)
+  );
+}
+
 function convertText(s) {
-  if (
-    !s ||
-    (!SEP_RE.test(s) &&
-      !/[()\/]/.test(s) &&
-      !/\b(iel|iels|ielle|ielles|toustes|celleux|illes)\b/i.test(s))
-  ) {
+  if (!s || !isLikelyInclusiveWriting(s)) {
     return s; // rapide: rien à faire
   }
   let out = normSeparators(s);
@@ -112,6 +121,12 @@ describe("Stop écriture inclusive", () => {
       expect(convertText("directeur·rice·s")).toBe("directeurs");
     });
 
+    test("convertit les doublets avec tiret", () => {
+      expect(convertText("étudiant-e-s")).toBe("étudiants");
+      expect(convertText("directeur-rice-s")).toBe("directeurs");
+      expect(convertText("un-e étudiant-e")).toBe("un étudiant");
+    });
+
     test("convertit les parenthèses", () => {
       expect(convertText("étudiant(e)s")).toBe("étudiants");
     });
@@ -147,6 +162,18 @@ describe("Stop écriture inclusive", () => {
       code.textContent = "étudiant·e·s";
       document.body.appendChild(code);
       expect(code.textContent).toBe("étudiant·e·s");
+    });
+
+    test("ignore les éléments qui ne sont pas de l'écriture inclusive", () => {
+      const span = document.createElement("span");
+      span.textContent = "file.txt";
+      document.body.appendChild(span);
+      expect(span.textContent).toBe("file.txt");
+
+      const span2 = document.createElement("span");
+      span2.textContent = "mon-fichier.js";
+      document.body.appendChild(span2);
+      expect(span2.textContent).toBe("mon-fichier.js");
     });
   });
 });

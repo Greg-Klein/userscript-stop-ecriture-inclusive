@@ -15,8 +15,8 @@
   // Plage Unicode pour lettres FR, apostrophes & traits usuels.
   const L = "A-Za-zÀ-ÖØ-öø-ÿ";
   // Tous les séparateurs "point médian like"
-  const SEP_CLASS = "[·•⋅·‧.-]";
-  const SEP_RE = /[·•⋅·‧.-]/g;
+  const SEP_CLASS = "[·•⋅·‧-]";
+  const SEP_RE = /[·•⋅·‧-]/g;
 
   const shouldSkipNode = (node) => {
     if (!node || !node.parentNode) return true;
@@ -44,8 +44,9 @@
   //    - "arrivé·e·s"  -> "arrivés"
   //    - "lecteur·rice·s" -> "lecteurs"
   //    - "fier·ère"    -> "fier"
+  //    - "étudiant-e-s" -> "étudiants"
   //
-  // Heuristique simple et robuste : on conserve la base AVANT le 1er point médian,
+  // Heuristique simple et robuste : on conserve la base AVANT le 1er séparateur,
   // puis on ajoute "s" si la forme comporte un "·s" final.
   const rePointMedianWord = new RegExp(
     `\\b([${L}'-]+)(?:${SEP_CLASS}[${L}'-]+)+(?:${SEP_CLASS}s)?\\b`,
@@ -104,13 +105,26 @@
   //    (déjà couvert par 1), mais garde-fous si « ·s » a disparu lors d'autres remplacements)
   const reTrailingDotS = new RegExp(`${SEP_CLASS}s\\b`, "giu");
 
+  function isLikelyInclusiveWriting(s) {
+    // Vérifie si le texte ressemble à de l'écriture inclusive
+    return (
+      // Contient un séparateur entre deux lettres
+      (/[A-Za-zÀ-ÿ][·•⋅·‧-][A-Za-zÀ-ÿ]/.test(s) &&
+        // Évite les noms de fichiers avec tiret
+        !/\.[a-z]+$/i.test(s) &&
+        // Évite les URLs avec tiret
+        !/(https?:\/\/|\w+\.\w+\/)[^\s]*/.test(s)) ||
+      // Contient une parenthèse entre deux lettres
+      /[A-Za-zÀ-ÿ]\([A-Za-zÀ-ÿ]/.test(s) ||
+      // Contient un slash entre deux lettres
+      /[A-Za-zÀ-ÿ]\/[A-Za-zÀ-ÿ]/.test(s) ||
+      // Contient un pronom inclusif
+      /\b(iel|iels|ielle|ielles|toustes|celleux|illes)\b/i.test(s)
+    );
+  }
+
   function convertText(s) {
-    if (
-      !s ||
-      (!SEP_RE.test(s) &&
-        !/[()\/]/.test(s) &&
-        !/\b(iel|iels|ielle|ielles|toustes|celleux|illes)\b/i.test(s))
-    ) {
+    if (!s || !isLikelyInclusiveWriting(s)) {
       return s; // rapide: rien à faire
     }
     let out = normSeparators(s);
