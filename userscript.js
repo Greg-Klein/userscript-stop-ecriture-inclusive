@@ -161,6 +161,10 @@ function removeInclusiveWriting(s) {
       replacement: "beaux",
     },
     {
+      pattern: `${startBoundary}jume${patternSeparators}aux${patternSeparators}lles${endBoundary}`,
+      replacement: "jumeaux",
+    },
+    {
       pattern: `${startBoundary}quelqu'un${patternSeparators}e${endBoundary}`,
       replacement: "quelqu'un",
     },
@@ -193,8 +197,8 @@ function removeInclusiveWriting(s) {
       // Handle doublets with separator (except compound names with hyphen and already treated cases)
       pattern: `(?<!\\.)(?<!-)(?<!-il)(?<!serait-)${startBoundary}([\\p{L}]+)${patternSeparators}[\\p{L}]+(?:${patternSeparators}s)?${endBoundary}`,
       replacement: (m, prefix) => {
-        // If the match ends with 's' and the prefix doesn't already end with 's', add 's'
-        if (m.endsWith("s") && !prefix.endsWith("s")) {
+        // If the match ends with 's' and the prefix doesn't already end with 's' or 'x', add 's'
+        if (m.endsWith("s") && !prefix.endsWith("s") && !prefix.endsWith("x")) {
           return prefix + "s";
         }
         return prefix;

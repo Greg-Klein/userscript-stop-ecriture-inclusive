@@ -43,6 +43,22 @@ describe("Stop Inclusive Writing", () => {
       );
     });
 
+    test("should handle jume·aux·lles pattern with iel", () => {
+      expect(
+        removeInclusiveWriting(
+          "Ce sont des jume·aux·lles, et iel en est fier·ière !"
+        )
+      ).toBe("Ce sont des jumeaux, et il en est fier !");
+    });
+
+    test("should handle représentant·e·s syndicaux·ales pattern", () => {
+      expect(
+        removeInclusiveWriting(
+          "Les représentant·e·s syndicaux·ales sont en route."
+        )
+      ).toBe("Les représentants syndicaux sont en route.");
+    });
+
     test("should handle cher·e·s pattern", () => {
       expect(removeInclusiveWriting("Cher·e·s copaines")).toBe("Chers copains");
     });
