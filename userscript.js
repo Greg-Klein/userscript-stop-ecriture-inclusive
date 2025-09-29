@@ -113,7 +113,9 @@
         // Évite les noms de fichiers avec tiret
         !/\.[a-z]+$/i.test(s) &&
         // Évite les URLs avec tiret
-        !/(https?:\/\/|\w+\.\w+\/)[^\s]*/.test(s)) ||
+        !/(https?:\/\/|\w+\.\w+\/)[^\s]*/.test(s) &&
+        // Évite les mots avec tirets qui ne ressemblent pas à de l'écriture inclusive
+        !/\w+(-\w{2,}){2,}/.test(s)) ||
       // Contient une parenthèse entre deux lettres
       /[A-Za-zÀ-ÿ]\([A-Za-zÀ-ÿ]/.test(s) ||
       // Contient un slash entre deux lettres

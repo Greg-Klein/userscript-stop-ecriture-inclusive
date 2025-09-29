@@ -70,7 +70,13 @@ function isLikelyInclusiveWriting(s) {
   // Vérifie si le texte ressemble à de l'écriture inclusive
   return (
     // Contient un séparateur entre deux lettres
-    /[A-Za-zÀ-ÿ][·•⋅·‧-][A-Za-zÀ-ÿ]/.test(s) ||
+    (/[A-Za-zÀ-ÿ][·•⋅·‧-][A-Za-zÀ-ÿ]/.test(s) &&
+      // Évite les noms de fichiers avec tiret
+      !/\.[a-z]+$/i.test(s) &&
+      // Évite les URLs avec tiret
+      !/(https?:\/\/|\w+\.\w+\/)[^\s]*/.test(s) &&
+      // Évite les mots avec tirets qui ne ressemblent pas à de l'écriture inclusive
+      !/\w+(-\w{2,}){2,}/.test(s)) ||
     // Contient une parenthèse entre deux lettres
     /[A-Za-zÀ-ÿ]\([A-Za-zÀ-ÿ]/.test(s) ||
     // Contient un slash entre deux lettres
@@ -174,6 +180,35 @@ describe("Stop écriture inclusive", () => {
       span2.textContent = "mon-fichier.js";
       document.body.appendChild(span2);
       expect(span2.textContent).toBe("mon-fichier.js");
+
+      const span3 = document.createElement("span");
+      span3.textContent = "https://mon-site.com";
+      document.body.appendChild(span3);
+      expect(span3.textContent).toBe("https://mon-site.com");
+
+      const span4 = document.createElement("span");
+      span4.textContent = "userscript-test";
+      document.body.appendChild(span4);
+      expect(span4.textContent).toBe("userscript-test");
+
+      const span5 = document.createElement("span");
+      span5.textContent = "2025-01-01";
+      document.body.appendChild(span5);
+      expect(span5.textContent).toBe("2025-01-01");
+
+      // Test pour les noms de scripts avec plusieurs tirets
+      const span6 = document.createElement("span");
+      span6.textContent = "userscript-stop-ecriture-inclusive";
+      document.body.appendChild(span6);
+      expect(span6.textContent).toBe("userscript-stop-ecriture-inclusive");
+
+      const span7 = document.createElement("span");
+      span7.textContent =
+        "userscript-stop-ecriture-inclusive-avec-beaucoup-de-tirets";
+      document.body.appendChild(span7);
+      expect(span7.textContent).toBe(
+        "userscript-stop-ecriture-inclusive-avec-beaucoup-de-tirets"
+      );
     });
   });
 });
