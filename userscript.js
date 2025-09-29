@@ -175,7 +175,14 @@ function removeInclusiveWriting(s) {
     {
       // Handle -rice endings
       pattern: `${startBoundary}([\\p{L}]+)(?:eur|teur)${patternSeparators}rice(?:${patternSeparators}s)?${endBoundary}`,
-      replacement: (m, prefix) => `${prefix}eur${m.endsWith("s") ? "s" : ""}`,
+      replacement: (m, prefix) => {
+        const base = `${prefix}eur`;
+        // If the match ends with 's' and the base doesn't already end with 's', add 's'
+        if (m.endsWith("s") && !base.endsWith("s")) {
+          return base + "s";
+        }
+        return base;
+      },
     },
     {
       // Handle -e and -s endings (except after serait)
@@ -185,7 +192,13 @@ function removeInclusiveWriting(s) {
     {
       // Handle doublets with separator (except compound names with hyphen and already treated cases)
       pattern: `(?<!\\.)(?<!-)(?<!-il)(?<!serait-)${startBoundary}([\\p{L}]+)${patternSeparators}[\\p{L}]+(?:${patternSeparators}s)?${endBoundary}`,
-      replacement: (m, prefix) => prefix + (m.endsWith("s") ? "s" : ""),
+      replacement: (m, prefix) => {
+        // If the match ends with 's' and the prefix doesn't already end with 's', add 's'
+        if (m.endsWith("s") && !prefix.endsWith("s")) {
+          return prefix + "s";
+        }
+        return prefix;
+      },
     },
   ];
 

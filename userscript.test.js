@@ -27,8 +27,12 @@ describe("Stop Inclusive Writing", () => {
   describe("Middle dots (·)", () => {
     test("should handle directeur·rice pattern", () => {
       expect(
-        removeInclusiveWriting("Jean-Michel le directeur·rice arrive")
-      ).toBe("Jean-Michel le directeur arrive");
+        removeInclusiveWriting(
+          "Jean-Michel le directeur·rice arrive ce matin à Saint-Denis, car iel a une annonce à faire. Soyez gentils·les !"
+        )
+      ).toBe(
+        "Jean-Michel le directeur arrive ce matin à Saint-Denis, car il a une annonce à faire. Soyez gentils !"
+      );
     });
 
     test("should handle complex sentence with multiple patterns", () => {
